@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from typing import Dict, List
+from typing import Dict, List, NamedTuple, Any
 import time
 from logging import getLogger
 
@@ -39,6 +39,12 @@ class Thermostat:
 
 
 class ThermostatEndpoint:
+
+    class TimedSetter(NamedTuple):
+        task: asyncio.Task
+        key: str
+        orig_value: Any
+
     def __init__(self, url, get_session, timeout=10):
         self.url = url
         self.get_session = get_session
@@ -53,6 +59,10 @@ class ThermostatEndpoint:
         # Maps keys to a list of Event objects that want to be notified when
         # a key is updated
         self.watchers: Dict[str, List[asyncio.Event]] = defaultdict(list)
+
+        # Maps keys to tasks that are scheduled to set that key to a different
+        # value in the future
+        self.timed_setters: Dict[str, asyncio.Task] = {}
 
     async def watch(self, key):
         """Returns an async iterator that yields a value whenever it changes"""
@@ -131,3 +141,56 @@ class ThermostatEndpoint:
             current = await self.get(key)
         await self.set(key, current-1)
 
+    async def set_for_time(self, key, new_value, duration):
+        """Sets a value for the given duration, then sets it back
+
+        Returns a tuple of (task, key, orig_value) so the caller can keep track of
+        the status of the timed setter."""
+        original_value = await self.get(key)
+        await self.set(key, new_value)
+        if key in self.timed_setters:
+            self.timed_setters[key].cancel()
+
+        task = self.timed_setters[key] = asyncio.create_task(
+            self._set_back_at(key, original_value, new_value, time.monotonic() + duration)
+        )
+
+        return self.TimedSetter(
+            task=task,
+            key=key,
+            orig_value=original_value,
+        )
+
+    async def _set_back_at(self, key, orig_value, new_value, timestamp):
+        """Watches the given key. If the current time is >= timestamp, then
+        set the key to orig_value. If the value changes from new_value at any point,
+        then do nothing and exit
+
+        """
+        # Because asynchronous iterators are sort of limited right now, we can't
+        # await on the next value of the iterator AND wait on something else
+        # at the same time (like a timeout), so this method re-implements much
+        # of the watch() logic.
+        event = asyncio.Event()
+        self.watchers[key].append(event)
+        try:
+            while True:
+                try:
+                    await asyncio.wait_for(event.wait(), self.timeout)
+                except asyncio.TimeoutError:
+                    # No events, query ourselves for a new value
+                    cur_value = (await self.get(key))
+                else:
+                    # Something else updated the value, see what it is
+                    cur_value = self.cached_values.get(key)
+
+                event.clear()
+                if cur_value != new_value:
+                    return
+
+                if time.monotonic() > timestamp:
+                    await self.set(key, orig_value)
+                    return
+
+        finally:
+            self.watchers[key].remove(event)
