@@ -238,6 +238,7 @@ class ThermostatEndpoint:
                     return
 
         finally:
+            logger.debug(f"timed setter for {key} is closing down")
             self.watchers[key].remove(event)
 
             # If we're the last timer and we're done, remove ourself from

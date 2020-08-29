@@ -27,8 +27,12 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
         self.thermostat: Optional[Thermostat] = None
         self.tasks: List[asyncio.Task] = []
 
+    @property
+    def hoststr(self):
+        return f"[{self.scope['client'][0]}:{self.scope['client'][1]}]"
+
     async def connect(self):
-        logger.info("New Websocket connected")
+        logger.info(f"New Websocket connected from {self.hoststr}")
         await self.accept()
 
         self.thermostat = await get_thermostat()
@@ -61,12 +65,13 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
             ))
 
     async def disconnect(self, code):
-        logger.info(f"Websocket disconnected with code {code}")
+        logger.info(f"Websocket disconnected from {self.hoststr} with code"
+                    f" {code}")
         for w in self.tasks:
             w.cancel()
 
     async def receive_json(self, content, **kwargs):
-        logger.info(f"Received message {content}")
+        logger.info(f"Received message from {self.hoststr} {content!r}")
         key = content['key']
 
         if "action" in content:
@@ -89,7 +94,8 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
     async def watch_value(self, field, key):
         iterator = field.watch(key)
         async for value, timer in iterator:
-            logger.debug(f"New value for {key}: {value}")
+            logger.debug(f"Sending new value for {key} to {self.hoststr}:"
+                         f" {value}")
             # Check to see if it has a timer set
             if timer is not None:
                 dt = datetime.fromtimestamp(timer.until)
@@ -107,6 +113,7 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
                     **extra_kwargs,
                 })
             except Exception:
-                logger.exception("Error sending JSON")
+                logger.exception(f"Error sending JSON to {self.hoststr}. "
+                                 f"Closing connection.")
                 await self.close()
                 raise
