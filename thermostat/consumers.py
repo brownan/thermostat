@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime
 from typing import List, Optional
 from logging import getLogger
 
@@ -76,14 +77,35 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
                 await self.thermostat.tstat.decrement(key)
         elif "value" in content:
             value = content['value']
-            await self.thermostat.tstat.set(key, value)
+            if 'duration' in content:
+                await self.thermostat.tstat.set_for_time(
+                    key,
+                    value,
+                    int(content['duration']),
+                )
+            else:
+                await self.thermostat.tstat.set(key, value)
 
-    async def watch_value(self, field, name):
-        iterator = field.watch(name)
-        async for value in iterator:
-            logger.debug(f"New value for {name}: {value}")
+    async def watch_value(self, field, key):
+        iterator = field.watch(key)
+        async for value, timer in iterator:
+            logger.debug(f"New value for {key}: {value}")
+            # Check to see if it has a timer set
+            if timer is not None:
+                dt = datetime.fromtimestamp(timer.until)
+                extra_kwargs = {
+                    'until': dt.strftime("%I:%M %p"),
+                }
+            else:
+                extra_kwargs = {}
+
             try:
-                await self.send_json({'key': name, 'value': value})
+                await self.send_json({
+                    'type': 'state-var',
+                    'key': key,
+                    'value': value,
+                    **extra_kwargs,
+                })
             except Exception:
                 logger.exception("Error sending JSON")
                 await self.close()

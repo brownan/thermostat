@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from typing import Dict, List, NamedTuple, Any
+from typing import Dict, List, NamedTuple, Any, Tuple
 import time
 from logging import getLogger
 
@@ -44,6 +44,7 @@ class ThermostatEndpoint:
         task: asyncio.Task
         key: str
         orig_value: Any
+        until: int
 
     def __init__(self, url, get_session, timeout=10):
         self.url = url
@@ -61,13 +62,17 @@ class ThermostatEndpoint:
         self.watchers: Dict[str, List[asyncio.Event]] = defaultdict(list)
 
         # Maps keys to tasks that are scheduled to set that key to a different
-        # value in the future
-        self.timed_setters: Dict[str, asyncio.Task] = {}
+        # value in the future. The int value is a timestamp for when the task
+        # is scheduled for
+        self.timed_setters: Dict[str, "ThermostatEndpoint.TimedSetter"] = {}
 
     async def watch(self, key):
         """Returns an async iterator that yields a value whenever it changes"""
         current_value = (await self.get(key))
-        yield current_value
+        current_timer = self.timed_setters.get(key)
+
+        yield current_value, current_timer
+
 
         event = asyncio.Event()
         self.watchers[key].append(event)
@@ -86,9 +91,14 @@ class ThermostatEndpoint:
                     new_value = self.cached_values.get(key)
 
                 event.clear()
-                if new_value != current_value:
-                    yield new_value
+
+                new_timer = self.timed_setters.get(key)
+
+                if new_value != current_value or new_timer != current_timer:
+                    yield new_value, new_timer
                     current_value = new_value
+                    current_timer = new_timer
+
         finally:
             self.watchers[key].remove(event)
 
@@ -144,21 +154,28 @@ class ThermostatEndpoint:
     async def set_for_time(self, key, new_value, duration):
         """Sets a value for the given duration, then sets it back
 
+        Duration is in minutes
+
         Returns a tuple of (task, key, orig_value) so the caller can keep track of
         the status of the timed setter."""
         original_value = await self.get(key)
+        if new_value == original_value:
+            return
+
         await self.set(key, new_value)
         if key in self.timed_setters:
-            self.timed_setters[key].cancel()
+            self.timed_setters[key].task.cancel()
 
-        task = self.timed_setters[key] = asyncio.create_task(
-            self._set_back_at(key, original_value, new_value, time.monotonic() + duration)
+        until = time.time() + duration*60
+
+        task = asyncio.create_task(
+            self._set_back_at(key, original_value, new_value, until)
         )
-
-        return self.TimedSetter(
+        self.timed_setters[key] = self.TimedSetter(
             task=task,
             key=key,
             orig_value=original_value,
+            until=until,
         )
 
     async def _set_back_at(self, key, orig_value, new_value, timestamp):
@@ -188,9 +205,12 @@ class ThermostatEndpoint:
                 if cur_value != new_value:
                     return
 
-                if time.monotonic() > timestamp:
+                if time.time() > timestamp:
                     await self.set(key, orig_value)
                     return
 
         finally:
             self.watchers[key].remove(event)
+            self.timed_setters.pop(key, None)
+            for w in self.watchers[key]:
+                w.set()

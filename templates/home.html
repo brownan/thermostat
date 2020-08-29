@@ -181,6 +181,19 @@
                 On
             </button>
         </div>
+        <div v-if="timers.fmode" class="status-info">
+            Overridden until {% verbatim %}{{ timers.fmode }}{% endverbatim %}
+        </div>
+        <div v-else-if="thermostat.fmode != 2">
+            <button type="button"
+                    class="adj-btn"
+                    @click="timedOn(60*4)"
+            >On for 4 hours</button>
+            <button type="button"
+                    class="adj-btn"
+                    @click="timedOn(60*8)"
+            >8 hours</button>
+        </div>
     </div>
 
     <div class="panel" id="panel-humidity">
@@ -197,7 +210,8 @@
     var ws;
 
     let obs = Vue.observable({
-        thermostat: {}
+        thermostat: {},
+        timers: {},
     });
 
     function connect() {
@@ -213,10 +227,18 @@
         }
         ws.onmessage = function(message) {
             let data = JSON.parse(message.data);
-            let key = data.key;
-            let value = data.value;
-            console.log("Got message", key, value);
-            Vue.set(obs.thermostat, key, value);
+            if (data.type === "state-var") {
+                let key = data.key;
+                let value = data.value;
+                console.log(`New value for ${key}: ${value} ${data['until']||''}`);
+                Vue.set(obs.thermostat, key, value);
+
+                if (data['until']) {
+                    Vue.set(obs.timers, key, data['until']);
+                } else {
+                    Vue.delete(obs.timers, key);
+                }
+            }
         };
         ws.onclose = function () {
             console.error("WS connection closed. Reconnecting...");
@@ -231,6 +253,7 @@
         let Panel = Vue.extend({
             computed: {
                 thermostat: () => obs.thermostat,
+                timers: () => obs.timers,
             }
         })
         new Panel({
@@ -298,6 +321,14 @@
                     ws.send(JSON.stringify({
                         key: 'fmode',
                         value: val,
+                    }))
+                },
+                timedOn(duration) {
+                    console.log(`Turning fan on for ${duration} minutes`);
+                    ws.send(JSON.stringify({
+                        key: 'fmode',
+                        value: 2,
+                        duration: duration,
                     }))
                 }
             }
