@@ -4,6 +4,7 @@ from typing import List, Optional
 from logging import getLogger
 
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
+from django.utils import timezone
 
 from .thermostat import Thermostat
 
@@ -99,7 +100,10 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
                              f" {value}")
                 # Check to see if it has a timer set
                 if timer is not None:
-                    dt = datetime.fromtimestamp(timer.until)
+                    dt = datetime.fromtimestamp(
+                        timer.until,
+                        timezone.get_current_timezone()
+                    )
                     extra_kwargs = {
                         'until': dt.strftime("%I:%M %p"),
                     }
