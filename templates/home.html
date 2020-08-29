@@ -31,13 +31,16 @@
             padding-bottom: 1em;
         }
 
+        .status-info {
+            font-size: 19pt;
+        }
+
         .adj-btn {
             display: inline-block;
             font-weight: 400;
             cursor: pointer;
             border: 1px solid transparent;
             color: #333;
-            background-color: #fff;
             padding: 10px 16px;
             font-size: 30px;
             line-height: 75%;
@@ -61,6 +64,10 @@
             transform: rotate(180deg);
         }
 
+        .adj-btn.selected {
+            background-image: linear-gradient(to bottom, #CFC 0, #9F9 100%);
+        }
+
     </style>
 </head>
 <body>
@@ -69,21 +76,49 @@
         <h2>Temperature</h2>
         <div>
             <span v-if="thermostat.tstate === undefined">Connecting...</span>
-            <span v-else-if="thermostat.tstate == 0">Idle</span>
-            <span v-else-if="thermostat.tstate == 1">Currently Heating</span>
-            <span v-else-if="thermostat.tstate == 2">Currently Cooling</span>
-            <span v-else-if="thermostat.tstate == -1">Disconnected.
-                Reconnecting...</span>
+            <span v-else>
+                {% verbatim %}{{ tstate }}{% endverbatim %}
+            </span>
         </div>
-        <div style="font-size: 18pt">
+        <div style="font-size: 25pt">
             {% verbatim %}{{ thermostat.temp }}{% endverbatim %}°F
+        </div>
+        <div>
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.tmode==0}"
+                    @click="setTmode(0)"
+            >
+                Off
+            </button>
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.tmode==1}"
+                    @click="setTmode(1)"
+                    >
+                Heat
+            </button>
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.tmode==2}"
+                    @click="setTmode(2)"
+            >
+                Cool
+            </button>
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.tmode==3}"
+                    @click="setTmode(3)"
+            >
+                Auto
+            </button>
         </div>
     </div>
 
     <div id="panel-t_cool" class="panel" v-if="thermostat.t_cool">
         <h2>Cool Setpoint</h2>
         <div>
-            <span>
+            <span class="status-info">
                 {% verbatim %}{{ thermostat.t_cool }}{% endverbatim %}
             </span>°F
         </div>
@@ -102,7 +137,7 @@
     <div id="panel-t_heat" class="panel" v-if="thermostat.t_heat">
         <h2>Heat Setpoint</h2>
         <div>
-            <span>
+            <span class="status-info">
                 {% verbatim %}{{ thermostat.t_heat }}{% endverbatim %}
             </span>°F
         </div>
@@ -120,17 +155,37 @@
 
     <div class="panel" id="panel-fan">
         <h2>Fan</h2>
-        <div>
+        <div class="status-info">
             {% verbatim %}{{ fstate }}{% endverbatim %}
         </div>
         <div>
-            Mode: {% verbatim %}{{ fmode }}{% endverbatim %}
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.fmode == 0}"
+                    @click="setFmode(0)"
+                    >
+                Auto
+            </button>
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.fmode == 1}"
+                    @click="setFmode(1)"
+                    >
+                Circulate
+            </button>
+            <button type="button"
+                    class="adj-btn"
+                    :class="{selected: thermostat.fmode == 2}"
+                    @click="setFmode(2)"
+                    >
+                On
+            </button>
         </div>
     </div>
 
     <div class="panel" id="panel-humidity">
         <h2>Humidity</h2>
-        <div>
+        <div class="status-info">
             {% verbatim %}{{ thermostat.humidity }}{% endverbatim %}%
         </div>
     </div>
@@ -166,7 +221,7 @@
         ws.onclose = function () {
             console.error("WS connection closed. Reconnecting...");
             Vue.set(obs.thermostat, "tstate", -1);
-            window.setTimeout(connect, 5000)
+            window.setTimeout(connect, 1000)
         }
     }
 
@@ -178,7 +233,28 @@
                 thermostat: () => obs.thermostat,
             }
         })
-        new Panel({el: '#panel-temp'});
+        new Panel({
+            el: '#panel-temp',
+            computed: {
+                tstate() {
+                    return {
+                        0: "Idle",
+                        1: "Currently Heating",
+                        2: "Currently Cooling",
+                        '-1': "Disconnected. Reconnecting...",
+                    }[this.thermostat.tstate];
+                }
+            },
+            methods: {
+                setTmode(val) {
+                    console.log("Setting tmode: ", val);
+                    ws.send(JSON.stringify({
+                        key: "tmode",
+                        value: val,
+                    }))
+                }
+            }
+        });
         new Panel({
             el: '#panel-t_cool',
             methods: {
@@ -212,12 +288,17 @@
                         1: "Currently On",
                     }[this.thermostat.fstate]
                 },
-                fmode() {
-                    return {
-                        0: "Auto",
-                        1: "Circulate",
-                        2: "On",
-                    }[this.thermostat.fmode]
+            },
+            methods: {
+                setFmode(val) {
+                    if (val === this.thermostat.fmode) {
+                        return;
+                    }
+                    console.log("Setting fmode: ", val);
+                    ws.send(JSON.stringify({
+                        key: 'fmode',
+                        value: val,
+                    }))
                 }
             }
         });

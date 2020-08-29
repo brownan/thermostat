@@ -39,7 +39,11 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
             # Heating setpoint
             (self.thermostat.tstat, "t_heat"),
             # Current fan mode
+            # (0 - Auto, 1 - Circulate, 2 - On)
             (self.thermostat.tstat, "fmode"),
+            # Current thermostat mode
+            # (0 - Off, 1 - Heat, 2 - Cool, 3 - Auto)
+            (self.thermostat.tstat, "tmode"),
 
             # System status variables (read only)
             # Current temperature
@@ -62,13 +66,17 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
 
     async def receive_json(self, content, **kwargs):
         logger.info(f"Received message {content}")
-        action = content['action']
         key = content['key']
 
-        if action == "increment":
-            await self.thermostat.tstat.increment(key)
-        elif action == "decrement":
-            await self.thermostat.tstat.decrement(key)
+        if "action" in content:
+            action = content['action']
+            if action == "increment":
+                await self.thermostat.tstat.increment(key)
+            elif action == "decrement":
+                await self.thermostat.tstat.decrement(key)
+        elif "value" in content:
+            value = content['value']
+            await self.thermostat.tstat.set(key, value)
 
     async def watch_value(self, field, name):
         iterator = field.watch(name)

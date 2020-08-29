@@ -1,6 +1,6 @@
 import asyncio
 from collections import defaultdict
-from typing import Optional, Dict, List
+from typing import Dict, List
 import time
 from logging import getLogger
 
@@ -113,8 +113,8 @@ class ThermostatEndpoint:
         async with session.post(self.url, json=data) as response:
             response.raise_for_status()
 
-        # Update the cached value so any watchers will see this value until
-        # the next general update
+        # Update the cached value so any watchers will see the new value until
+        # the next general update from the thermostat
         self.cached_values[key] = value
         for watcher in self.watchers[key]:
             watcher.set()
@@ -130,3 +130,4 @@ class ThermostatEndpoint:
         if current is None:
             current = await self.get(key)
         await self.set(key, current-1)
+
