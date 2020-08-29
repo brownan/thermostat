@@ -94,7 +94,7 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
             if timer is not None:
                 dt = datetime.fromtimestamp(timer.until)
                 extra_kwargs = {
-                    'until': dt.strftime("%I:%M %p"),
+                    'until': dt.strftime("%I:%M %p"),
                 }
             else:
                 extra_kwargs = {}

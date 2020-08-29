@@ -184,11 +184,15 @@
         <div v-if="timers.fmode" class="status-info">
             Overridden until {% verbatim %}{{ timers.fmode }}{% endverbatim %}
         </div>
-        <div v-else-if="thermostat.fmode != 2">
+        <div>
+            <button type="button"
+                    class="adj-btn"
+                    @click="timedOn(60)"
+            >1 hour</button>
             <button type="button"
                     class="adj-btn"
                     @click="timedOn(60*4)"
-            >On for 4 hours</button>
+            >4 hours</button>
             <button type="button"
                     class="adj-btn"
                     @click="timedOn(60*8)"
@@ -314,9 +318,6 @@
             },
             methods: {
                 setFmode(val) {
-                    if (val === this.thermostat.fmode) {
-                        return;
-                    }
                     console.log("Setting fmode: ", val);
                     ws.send(JSON.stringify({
                         key: 'fmode',

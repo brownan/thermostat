@@ -133,6 +133,13 @@ class ThermostatEndpoint:
         async with session.post(self.url, json=data) as response:
             response.raise_for_status()
 
+        # Setting a value is one way to clear a timer, even if it's being set
+        # to the current value.
+        timer = self.timed_setters.get(key)
+        if timer is not None:
+            timer.task.cancel()
+            del self.timed_setters[key]
+
         # Update the cached value so any watchers will see the new value until
         # the next general update from the thermostat
         self.cached_values[key] = value
@@ -158,13 +165,29 @@ class ThermostatEndpoint:
 
         Returns a tuple of (task, key, orig_value) so the caller can keep track of
         the status of the timed setter."""
-        original_value = await self.get(key)
-        if new_value == original_value:
-            return
+        existing_timer = self.timed_setters.get(key)
 
-        await self.set(key, new_value)
-        if key in self.timed_setters:
-            self.timed_setters[key].task.cancel()
+        # What do we set the value back to when the timer expires?
+        if existing_timer is not None:
+            # We're replacing an existing timer. Use the original original value
+            original_value = existing_timer.orig_value
+            logger.info(f"Replacing timer for {key}")
+        else:
+            # Setting a new timer. Use the current value as the original value
+            original_value = await self.get(key)
+            if original_value == new_value:
+                # No point in setting a timer
+                logger.debug(f"Can't set timer for {key}")
+                return
+            logger.info(f"Setting new timer for {key}")
+
+        if original_value != new_value:
+            await self.set(key, new_value)
+
+        # Make sure any existing timed setter tasks are canceled before we
+        # replace it
+        if existing_timer is not None:
+            existing_timer.task.cancel()
 
         until = time.time() + duration*60
 
@@ -177,6 +200,11 @@ class ThermostatEndpoint:
             orig_value=original_value,
             until=until,
         )
+
+        # Alert any waiters that there's a new timed setter and possibly a new
+        # value (although that would have been done by set())
+        for w in self.watchers[key]:
+            w.set()
 
     async def _set_back_at(self, key, orig_value, new_value, timestamp):
         """Watches the given key. If the current time is >= timestamp, then
@@ -211,6 +239,17 @@ class ThermostatEndpoint:
 
         finally:
             self.watchers[key].remove(event)
-            self.timed_setters.pop(key, None)
-            for w in self.watchers[key]:
-                w.set()
+
+            # If we're the last timer and we're done, remove ourself from
+            # the timed_setters dict and alert any watchers.
+            # It's possible we're not the current task in the timed_setters
+            # dict though: set_for_time() may have replaced us.
+            # It's also possible set() removed the item already, if an explicit
+            # set() was given to cancel the timer.
+            ts = self.timed_setters.get(key)
+            if ts is not None and ts.task is asyncio.current_task():
+                logger.debug("_set_back_at removing own task from "
+                             f"timed_setters list (key {key})")
+                del self.timed_setters[key]
+                for w in self.watchers[key]:
+                    w.set()

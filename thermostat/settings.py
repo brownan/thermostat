@@ -124,6 +124,7 @@ STATICFILES_DIRS = [
     BASE_DIR / "static",
 ]
 STATIC_URL = '/static/'
+STATIC_ROOT = BASE_DIR / "static-root"
 
 ASGI_APPLICATION = 'thermostat.routing.application'
 
