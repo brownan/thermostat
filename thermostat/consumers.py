@@ -112,6 +112,8 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
                     'value': value,
                     **extra_kwargs,
                 })
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(f"Error in {self.hoststr}'s watcher for {key}. "
                              f"Closing websocket.")

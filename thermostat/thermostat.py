@@ -103,11 +103,13 @@ class ThermostatEndpoint:
                     current_value = new_value
                     current_timer = new_timer
 
+        except asyncio.CancelledError:
+            raise
         except Exception:
             logger.exception(f"Watcher for {key} got unhandled exception")
             raise
         finally:
-            logger.info(f"Watcher for {key} is exiting")
+            logger.debug(f"Watcher for {key} is exiting")
             self.watchers[key].remove(event)
 
     async def get(self, key):
