@@ -92,28 +92,28 @@ class ThermostatControl(AsyncJsonWebsocketConsumer):
                 await self.thermostat.tstat.set(key, value)
 
     async def watch_value(self, field, key):
-        iterator = field.watch(key)
-        async for value, timer in iterator:
-            logger.debug(f"Sending new value for {key} to {self.hoststr}:"
-                         f" {value}")
-            # Check to see if it has a timer set
-            if timer is not None:
-                dt = datetime.fromtimestamp(timer.until)
-                extra_kwargs = {
-                    'until': dt.strftime("%I:%M %p"),
-                }
-            else:
-                extra_kwargs = {}
+        try:
+            iterator = field.watch(key)
+            async for value, timer in iterator:
+                logger.info(f"Sending new value for {key} to {self.hoststr}:"
+                             f" {value}")
+                # Check to see if it has a timer set
+                if timer is not None:
+                    dt = datetime.fromtimestamp(timer.until)
+                    extra_kwargs = {
+                        'until': dt.strftime("%I:%M %p"),
+                    }
+                else:
+                    extra_kwargs = {}
 
-            try:
                 await self.send_json({
                     'type': 'state-var',
                     'key': key,
                     'value': value,
                     **extra_kwargs,
                 })
-            except Exception:
-                logger.exception(f"Error sending JSON to {self.hoststr}. "
-                                 f"Closing connection.")
-                await self.close()
-                raise
+        except Exception:
+            logger.exception(f"Error in {self.hoststr}'s watcher for {key}. "
+                             f"Closing websocket.")
+            await self.close()
+            raise

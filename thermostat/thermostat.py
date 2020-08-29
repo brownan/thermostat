@@ -71,6 +71,8 @@ class ThermostatEndpoint:
         current_value = (await self.get(key))
         current_timer = self.timed_setters.get(key)
 
+        logger.debug(f"Starting new watcher for {key}. Initial value: {current_value}")
+
         yield current_value, current_timer
 
 
@@ -95,14 +97,28 @@ class ThermostatEndpoint:
                 new_timer = self.timed_setters.get(key)
 
                 if new_value != current_value or new_timer != current_timer:
+                    logger.debug(f"Watcher: Key {key} changed: "
+                                 f"{current_value} → {new_value}")
                     yield new_value, new_timer
                     current_value = new_value
                     current_timer = new_timer
 
+        except Exception:
+            logger.exception(f"Watcher for {key} got unhandled exception")
+            raise
         finally:
+            logger.info(f"Watcher for {key} is exiting")
             self.watchers[key].remove(event)
 
     async def get(self, key):
+        """Get the value for the given key
+
+        Returns cached data if it was last fetched less than self.timeout
+        seconds ago. Otherwise, fetches and updates all keys, then returns
+        the requested key.
+
+        May raise asyncio.TimeoutError if the fetch fails.
+        """
         # Only one fetch allowed at a time. If two tasks try to call this, the
         # second one will wait on the lock, and then get the cached value.
         async with self._get_lock:
@@ -122,9 +138,22 @@ class ThermostatEndpoint:
 
     async def _fetch(self):
         session = await self.get_session()
-        async with session.get(self.url) as response:
-            response.raise_for_status()
-            return await response.json()
+        TRIES = 5
+        n = 1
+        while True:
+            try:
+                async with session.get(self.url) as response:
+                    response.raise_for_status()
+                    return await response.json()
+            except asyncio.TimeoutError:
+                n += 1
+                if n < TRIES:
+                    logger.warning(f"Request timed out for {self.url}. "
+                                   f"Retrying")
+                    await asyncio.sleep(1)
+                else:
+                    logger.error(f"Request failed {TRIES} times. Bailing.")
+                    raise
 
     async def set(self, key, value):
         session = await self.get_session()
