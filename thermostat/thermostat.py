@@ -141,7 +141,7 @@ class ThermostatEndpoint:
     async def _fetch(self):
         session = await self.get_session()
         TRIES = 5
-        n = 1
+        n = 0
         while True:
             try:
                 async with session.get(self.url) as response:
@@ -149,7 +149,7 @@ class ThermostatEndpoint:
                     return await response.json()
             except asyncio.TimeoutError:
                 n += 1
-                if n < TRIES:
+                if n <= TRIES:
                     logger.warning(f"Request timed out for {self.url}. "
                                    f"Retrying")
                     await asyncio.sleep(1)
@@ -262,11 +262,17 @@ class ThermostatEndpoint:
 
                 event.clear()
                 if cur_value != new_value:
+                    logger.info("Timed setter exiting because value changed out-of-band")
                     return
 
                 if time.time() > timestamp:
+                    logger.info(f"Timed setter setting {key} to {orig_value}")
                     await self.set(key, orig_value)
                     return
+
+        except Exception:
+            logger.exception("Timed setter task got an exception")
+            raise
 
         finally:
             logger.debug(f"timed setter for {key} is closing down")
