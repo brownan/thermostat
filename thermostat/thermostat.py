@@ -186,6 +186,7 @@ class ThermostatEndpoint:
 
         async with session.post(self.url, json=data) as response:
             response.raise_for_status()
+            logger.debug(f"Posting data {data} to {self.url}: {response.status}")
 
     async def increment(self, key):
         current = self.cached_values.get(key)
