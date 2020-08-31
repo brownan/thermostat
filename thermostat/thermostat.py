@@ -4,8 +4,7 @@ from typing import Dict, List, NamedTuple, Any, Tuple
 import time
 from logging import getLogger
 
-from aiohttp import ClientSession, ClientTimeout
-
+from aiohttp import ClientSession, ClientTimeout, TCPConnector
 
 logger = getLogger("thermostat.thermostat")
 
@@ -14,9 +13,10 @@ class Thermostat:
 
     def __init__(self, host):
         self.host = host
-        self._session_lock = asyncio.Lock()
         self._session = ClientSession(
-            timeout=ClientTimeout(total=5)
+            timeout=ClientTimeout(total=5),
+            # Only allow a single connection to the host at a time
+            connector=TCPConnector(limit=1),
         )
 
         self.tstat = ThermostatEndpoint(
@@ -31,8 +31,7 @@ class Thermostat:
         )
 
     async def get_session(self):
-        async with self._session_lock:
-            return self._session
+        return self._session
 
     def _construct_url(self, path):
         return f"http://{self.host}/{path.lstrip('/')}"
@@ -123,7 +122,15 @@ class ThermostatEndpoint:
         May raise asyncio.TimeoutError if the fetch fails.
         """
         # Only one fetch allowed at a time. If two tasks try to call this, the
-        # second one will wait on the lock, and then get the cached value.
+        # second one will wait on the lock, and then get the cached value once
+        # the lock is released.
+        # Note that the aiohttp connector we use is limited to a single
+        # connection, so a second task calling session.get() will wait to
+        # acquire the connection.
+        # Despite this, we don't want two tasks to both enter and wait for
+        # a connection if they're just going to make the same query. So this
+        # lock is still necessary. (And hence why the lock is per-endpoint,
+        # not thermostat-wide)
         async with self._get_lock:
             if (
                 self.last_fetched + self.timeout < time.monotonic()
