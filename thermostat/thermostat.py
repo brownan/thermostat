@@ -98,7 +98,8 @@ class ThermostatEndpoint:
 
                 if new_value != current_value or new_timer != current_timer:
                     logger.debug(f"Watcher: Key {key} changed: "
-                                 f"{current_value} → {new_value}")
+                                 f"{current_value} → {new_value}, new timer: "
+                                 f"{new_timer != current_timer}")
                     yield new_value, new_timer
                     current_value = new_value
                     current_timer = new_timer
@@ -140,7 +141,7 @@ class ThermostatEndpoint:
 
     async def _fetch(self):
         session = await self.get_session()
-        TRIES = 5
+        TRIES = 10
         n = 0
         while True:
             try:
@@ -269,6 +270,9 @@ class ThermostatEndpoint:
                     logger.info(f"Timed setter setting {key} to {orig_value}")
                     await self.set(key, orig_value)
                     return
+
+        except asyncio.CancelledError:
+            raise
 
         except Exception:
             logger.exception("Timed setter task got an exception")
