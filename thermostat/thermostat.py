@@ -166,12 +166,6 @@ class ThermostatEndpoint:
                     raise
 
     async def set(self, key, value):
-        session = await self.get_session()
-        data = {key: value}
-
-        async with session.post(self.url, json=data) as response:
-            response.raise_for_status()
-
         # Setting a value is one way to clear a timer, even if it's being set
         # to the current value.
         timer = self.timed_setters.get(key)
@@ -179,11 +173,19 @@ class ThermostatEndpoint:
             timer.task.cancel()
             del self.timed_setters[key]
 
-        # Update the cached value so any watchers will see the new value until
-        # the next general update from the thermostat
+        # Update the cached value so any watchers will see the new value
+        # immediately
         self.cached_values[key] = value
         for watcher in self.watchers[key]:
             watcher.set()
+
+        # For responsiveness to the client, the actual post is done after
+        # we update the cached value and notify any watchers
+        session = await self.get_session()
+        data = {key: value}
+
+        async with session.post(self.url, json=data) as response:
+            response.raise_for_status()
 
     async def increment(self, key):
         current = self.cached_values.get(key)
