@@ -167,10 +167,10 @@ class ThermostatEndpoint:
 
     async def set(self, key, value):
         # Setting a value is one way to clear a timer, even if it's being set
-        # to the current value.
+        # to the current value. The task will cancel itself once it sees it's
+        # been removed from self.timed_setters.
         timer = self.timed_setters.get(key)
         if timer is not None:
-            timer.task.cancel()
             del self.timed_setters[key]
 
         # Update the cached value so any watchers will see the new value
@@ -226,11 +226,6 @@ class ThermostatEndpoint:
         if original_value != new_value:
             await self.set(key, new_value)
 
-        # Make sure any existing timed setter tasks are canceled before we
-        # replace it
-        if existing_timer is not None:
-            existing_timer.task.cancel()
-
         until = time.time() + duration*60
 
         task = asyncio.create_task(
@@ -270,8 +265,18 @@ class ThermostatEndpoint:
                 else:
                     # Something else updated the value, see what it is
                     cur_value = self.cached_values.get(key)
-
                 event.clear()
+
+                # Check and see if we're still the current timer. Something else
+                # calling set() may have deleted or replaced this timer,
+                # but it's our responsibility to shut ourself down.
+                timer = self.timed_setters.get(key)
+                if timer is None or timer.task is not asyncio.current_task():
+                    logger.debug(f"Timed setter for {key} {orig_value}→"
+                                 f"{new_value} is exiting because it was "
+                                 f"replaced/removed")
+                    return
+
                 if cur_value != new_value:
                     logger.info("Timed setter exiting because value changed out-of-band")
                     return
@@ -289,7 +294,8 @@ class ThermostatEndpoint:
             raise
 
         finally:
-            logger.debug(f"timed setter for {key} is closing down")
+            logger.debug(f"timed setter for {key} {orig_value}→{new_value} is "
+                         f"closing down")
             self.watchers[key].remove(event)
 
             # If we're the last timer and we're done, remove ourself from
