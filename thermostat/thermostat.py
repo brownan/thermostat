@@ -22,6 +22,10 @@ class Thermostat:
         self.tstat = ThermostatEndpoint(
             self._construct_url("/tstat"),
             self.get_session,
+            setter_keymap={
+                't_heat': 'it_heat',
+                't_cool': 'it_cool',
+            }
         )
 
         self.humidity = ThermostatEndpoint(
@@ -45,10 +49,11 @@ class ThermostatEndpoint:
         orig_value: Any
         until: int
 
-    def __init__(self, url, get_session, timeout=10):
+    def __init__(self, url, get_session, timeout=10, setter_keymap=None):
         self.url = url
         self.get_session = get_session
         self.timeout = timeout
+        self.setter_keymap = setter_keymap or {}
 
         self._get_lock = asyncio.Lock()
 
@@ -182,7 +187,7 @@ class ThermostatEndpoint:
         # For responsiveness to the client, the actual post is done after
         # we update the cached value and notify any watchers
         session = await self.get_session()
-        data = {key: value}
+        data = {self.setter_keymap.get(key, key): value}
 
         async with session.post(self.url, json=data) as response:
             response.raise_for_status()
